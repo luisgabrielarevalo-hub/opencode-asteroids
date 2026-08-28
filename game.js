@@ -252,37 +252,75 @@ class Ship {
 
   draw() {
     if (this.dead) return;
-    // Parpadeo durante invencibilidad de reaparición
     if (this.invincible > 0 && Math.floor(this.invincible * 8) % 2 === 0) return;
 
+    const skin = SKINS[currentSkin];
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    ctx.strokeStyle = '#fff';
+    ctx.strokeStyle = skin.strokeColor;
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
 
-    // Silueta clásica: triángulo con muesca trasera
     ctx.beginPath();
-    ctx.moveTo( 20,  0);   // nariz
-    ctx.lineTo(-12, -9);   // ala izquierda
-    ctx.lineTo( -7,  0);   // muesca trasera
-    ctx.lineTo(-12,  9);   // ala derecha
+    ctx.moveTo(skin.verts[0][0], skin.verts[0][1]);
+    for (let i = 1; i < skin.verts.length; i++)
+      ctx.lineTo(skin.verts[i][0], skin.verts[i][1]);
     ctx.closePath();
     ctx.stroke();
 
-    // Llama del propulsor
     if (this.thrusting && Math.random() > 0.35) {
       ctx.beginPath();
       ctx.moveTo(-8, -4);
       ctx.lineTo(-8 - rand(6, 14), 0);
       ctx.lineTo(-8,  4);
-      ctx.strokeStyle = 'rgba(255, 130, 0, 0.85)';
+      ctx.strokeStyle = skin.flameColor;
       ctx.stroke();
     }
 
     ctx.restore();
   }
+}
+
+// ── Skins ────────────────────────────────────────────────────────────────────
+const SKINS = [
+  {
+    name: 'CLÁSICA',
+    verts: [[20, 0], [-12, -9], [-7, 0], [-12, 9]],
+    strokeColor: '#fff',
+    flameColor: 'rgba(255, 130, 0, 0.85)',
+  },
+  {
+    name: 'FLECHA',
+    verts: [[22, 0], [-5, -12], [-10, -5], [-8, 0], [-10, 5], [-5, 12]],
+    strokeColor: '#00e5ff',
+    flameColor: 'rgba(0, 180, 255, 0.85)',
+  },
+  {
+    name: 'ROMBO',
+    verts: [[18, 0], [0, -10], [-14, 0], [0, 10]],
+    strokeColor: '#ffd700',
+    flameColor: 'rgba(255, 80, 0, 0.85)',
+  },
+  {
+    name: 'ANGULAR',
+    verts: [[20, 0], [2, -14], [-6, -6], [-12, 0], [-6, 6], [2, 14]],
+    strokeColor: '#76ff03',
+    flameColor: 'rgba(180, 0, 255, 0.85)',
+  },
+];
+
+let currentSkin = parseInt(localStorage.getItem('skin') || '0', 10);
+if (currentSkin < 0 || currentSkin >= SKINS.length) currentSkin = 0;
+
+let toastText = '';
+let toastColor = '#fff';
+let toastTimer = 0;
+
+function showToast(text, color) {
+  toastText = text;
+  toastColor = color;
+  toastTimer = 1.5;
 }
 
 // ── Partículas (explosión) ────────────────────────────────────────────────────
@@ -439,6 +477,8 @@ function spawnShootingStar() {
 }
 
 function update(dt) {
+  if (toastTimer > 0) toastTimer -= dt;
+
   if (state === 'gameover') {
     if (pressed('Space')) initGame();
     particles.forEach(p => p.update(dt));
@@ -458,6 +498,13 @@ function update(dt) {
   // Disparar
   if (pressed('Space')) {
     bullets.push(...ship.tryShoot());
+  }
+
+  // Cambiar skin
+  if (pressed('KeyS')) {
+    currentSkin = (currentSkin + 1) % SKINS.length;
+    localStorage.setItem('skin', currentSkin);
+    showToast(SKINS[currentSkin].name, SKINS[currentSkin].strokeColor);
   }
 
   // Spawn de estrellas fugaces
@@ -548,7 +595,7 @@ function drawLifeIcon(x, y) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(-Math.PI / 2);
-  ctx.strokeStyle = '#fff';
+  ctx.strokeStyle = SKINS[currentSkin].strokeColor;
   ctx.lineWidth   = 1.2;
   ctx.lineJoin    = 'round';
   ctx.beginPath();
@@ -603,6 +650,13 @@ function draw() {
   ship.draw();
 
   drawHUD();
+
+  if (toastTimer > 0) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = toastColor;
+    ctx.font = 'bold 16px monospace';
+    ctx.fillText(`SKIN: ${toastText}`, W / 2, H / 2 + 60);
+  }
 
   if (state === 'gameover')
     drawOverlay('GAME OVER', `PUNTAJE: ${score}   —   ESPACIO PARA REINICIAR`);
