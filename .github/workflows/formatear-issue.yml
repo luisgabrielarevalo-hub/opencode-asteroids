@@ -1,0 +1,94 @@
+name: Formatear y etiquetar issues
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  formatear:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+      ISSUE_BODY: ${{ github.event.issue.body }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Instalar opencode
+        run: |
+          curl -fsSL https://opencode.ai/install | bash
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Analizar issue con opencode
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          {
+            echo "Eres un asistente que clasifica issues de GitHub del proyecto Asteroids (juego en game.js)."
+            echo
+            echo "== TITULO =="
+            echo "$ISSUE_TITLE"
+            echo
+            echo "== CUERPO (texto original, respétalo tal cual) =="
+            echo "$ISSUE_BODY"
+            echo
+            echo "== TAREA =="
+            echo "Analiza el issue y devuelve UNICA y exclusivamente un bloque JSON fenced como este:"
+            echo '```json'
+            echo '{ "resumen": "...", "tipo": "bug", "severidad": "media", "etiquetas": ["bug"] }'
+            echo '```'
+            echo "REGLAS:"
+            echo "- resumen: 1-2 oraciones en español."
+            echo "- tipo: bug|feature|mejora|pregunta|documentacion"
+            echo "- severidad: baja|media|alta"
+            echo "- etiquetas: SOLO de esta lista, de 1 a 2 maximo:"
+            echo "  bug, enhancement, question, documentation, duplicate, invalid, wontfix, help wanted, good first issue, accessibility"
+            echo "- bug->bug, feature/mejora->enhancement, pregunta->question, documentacion->documentation"
+          } > /tmp/prompt.txt
+
+          opencode run --model opencode/big-pickle "$(cat /tmp/prompt.txt)" \
+            > /tmp/opencode_out.txt 2>/tmp/opencode_err.txt
+
+          awk '/```json/{flag=1; next} /```/{if(flag){flag=0}} flag' \
+            /tmp/opencode_out.txt > /tmp/analysis.json
+
+          if [ ! -s /tmp/analysis.json ]; then
+            grep -o '{.*}' /tmp/opencode_out.txt > /tmp/analysis.json
+          fi
+          jq empty /tmp/analysis.json || { echo "Salida no parseable:"; cat /tmp/opencode_err.txt; exit 1; }
+          cat /tmp/analysis.json
+
+      - name: Agregar información y etiquetas
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const a = JSON.parse(fs.readFileSync('/tmp/analysis.json', 'utf8'));
+            const permitidas = ['bug','enhancement','question','documentation',
+                                'duplicate','invalid','wontfix','help wanted',
+                                'good first issue','accessibility'];
+            const etiquetas = [...new Set((a.etiquetas || []).filter(l => permitidas.includes(l)))];
+            const seccion = [
+              '',
+              '---',
+              '### 🤖 Análisis automático',
+              '',
+              `**Resumen:** ${a.resumen || '—'}`,
+              `**Tipo:** ${a.tipo || '—'}`,
+              `**Severidad:** ${a.severidad || '—'}`,
+              ''
+            ].join('\n');
+            const body = (process.env.ISSUE_BODY || '') + seccion;
+            await github.rest.issues.update({
+              ...context.repo, issue_number: context.issue.number, body
+            });
+            if (etiquetas.length) {
+              await github.rest.issues.addLabels({
+                ...context.repo, issue_number: context.issue.number, labels: etiquetas
+              });
+            }
