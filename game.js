@@ -206,7 +206,7 @@ class Ship {
     this.angle  = -Math.PI / 2;
     this.vx     = 0;
     this.vy     = 0;
-    this.radius = 12;
+    this.radius = 12 * SKINS[currentSkin].scale;
     this.thrusting     = false;
     this.invincible    = 3;
     this.shootCooldown = 0;
@@ -254,7 +254,7 @@ class Ship {
   tryShoot() {
     if (this.shootCooldown > 0 || this.dead) return [];
     this.shootCooldown = 0.2;
-    const NOSE = 21;
+    const NOSE = 21 * SKINS[currentSkin].scale;
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
     if (this.isTripleShot) {
@@ -290,10 +290,11 @@ class Ship {
     ctx.stroke();
 
     if (this.thrusting && Math.random() > 0.35) {
+      const s = SKINS[currentSkin].scale;
       ctx.beginPath();
-      ctx.moveTo(-8, -4);
-      ctx.lineTo(-8 - rand(6, 14), 0);
-      ctx.lineTo(-8,  4);
+      ctx.moveTo(-8 * s, -4 * s);
+      ctx.lineTo(-8 * s - rand(6, 14) * s, 0);
+      ctx.lineTo(-8 * s,  4 * s);
       ctx.strokeStyle = skin.flameColor;
       ctx.stroke();
     }
@@ -303,7 +304,7 @@ class Ship {
 
   drawShield() {
     const ratio = this.shield / this.shieldMax;
-    const RADIUS = 28;
+    const RADIUS = 28 * SKINS[currentSkin].scale;
     const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 250);
     const alpha = 0.35 + 0.45 * ratio + pulse * 0.2 * ratio;
 
@@ -336,24 +337,40 @@ const SKINS = [
     verts: [[20, 0], [-12, -9], [-7, 0], [-12, 9]],
     strokeColor: '#fff',
     flameColor: 'rgba(255, 130, 0, 0.85)',
+    scale: 1,
+    scoreMult: 1,
   },
   {
     name: 'FLECHA',
     verts: [[22, 0], [-5, -12], [-10, -5], [-8, 0], [-10, 5], [-5, 12]],
     strokeColor: '#00e5ff',
     flameColor: 'rgba(0, 180, 255, 0.85)',
+    scale: 1,
+    scoreMult: 1,
   },
   {
     name: 'ROMBO',
     verts: [[18, 0], [0, -10], [-14, 0], [0, 10]],
     strokeColor: '#ffd700',
     flameColor: 'rgba(255, 80, 0, 0.85)',
+    scale: 1,
+    scoreMult: 1,
   },
   {
     name: 'ANGULAR',
     verts: [[20, 0], [2, -14], [-6, -6], [-12, 0], [-6, 6], [2, 14]],
     strokeColor: '#76ff03',
     flameColor: 'rgba(180, 0, 255, 0.85)',
+    scale: 1,
+    scoreMult: 1,
+  },
+  {
+    name: 'MORADA',
+    verts: [[40, 0], [-24, -18], [-14, 0], [-24, 18]],
+    strokeColor: '#aa00ff',
+    flameColor: 'rgba(200, 0, 255, 0.85)',
+    scale: 2,
+    scoreMult: 2,
   },
 ];
 
@@ -603,7 +620,7 @@ function update(dt) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += POINTS[a.size];
+        score += POINTS[a.size] * (SKINS[currentSkin].scoreMult || 1);
         explode(a.x, a.y, a.size * 5);
         if (Math.random() < 0.3) powerups.push(new PowerUp(a.x, a.y));
         newAsteroids.push(...a.split());
@@ -620,7 +637,7 @@ function update(dt) {
       if (!s.dead && !b.dead && dist(b, s) < s.radius) {
         b.dead = true;
         s.dead = true;
-        score += SH_STAR_POINTS;
+        score += SH_STAR_POINTS * (SKINS[currentSkin].scoreMult || 1);
         explode(s.x, s.y, s.size * 5);
         newShootingStars.push(...s.split());
       }
@@ -652,7 +669,7 @@ function update(dt) {
         if (ship.shield > 0) {
           ship.shield--;
           a.dead = true;
-          score += POINTS[a.size];
+          score += POINTS[a.size] * (SKINS[currentSkin].scoreMult || 1);
           explode(a.x, a.y, a.size * 5);
           asteroids = asteroids.concat(a.split());
         } else {
@@ -667,7 +684,7 @@ function update(dt) {
           if (ship.shield > 0) {
             ship.shield--;
             s.dead = true;
-            score += SH_STAR_POINTS;
+            score += SH_STAR_POINTS * (SKINS[currentSkin].scoreMult || 1);
             explode(s.x, s.y, s.size * 5);
           } else {
             killShip();
