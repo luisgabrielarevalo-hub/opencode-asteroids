@@ -215,9 +215,11 @@ class Ship {
     this.shield        = 0;
     this.shieldMax     = 3;
     this.shieldTimer   = 0;
+    this.tripleShotTimer = 0;
   }
 
-  get isBoosted() { return this.boostTimer > 0; }
+  get isBoosted()    { return this.boostTimer > 0; }
+  get isTripleShot() { return this.tripleShotTimer > 0; }
 
   update(dt) {
     if (this.dead) return;
@@ -228,6 +230,7 @@ class Ship {
       this.shieldTimer -= dt;
       if (this.shieldTimer <= 0) this.shield = 0;
     }
+    if (this.tripleShotTimer > 0) this.tripleShotTimer -= dt;
 
     const ROT   = 3.5;   // rad/s
     const THRUST = this.isBoosted ? 520 : 260;  // px/s²
@@ -254,6 +257,14 @@ class Ship {
     const NOSE = 21;
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
+    if (this.isTripleShot) {
+      const SPREAD = 0.15;
+      return [
+        new Bullet(ox, oy, this.angle - SPREAD),
+        new Bullet(ox, oy, this.angle),
+        new Bullet(ox, oy, this.angle + SPREAD),
+      ];
+    }
     return [new Bullet(ox, oy, this.angle)];
   }
 
@@ -401,9 +412,10 @@ class PowerUp {
     this.y = y;
     this.vx = rand(-20, 20);
     this.vy = rand(-20, 20);
-    this.type = Math.random() < 0.55 ? 'shield' : 'speed';
+    const r = Math.random();
+    this.type = r < 0.4 ? 'shield' : r < 0.7 ? 'speed' : 'triple';
     this.radius = 14;
-    this.color = this.type === 'shield' ? '#0ff' : '#ff0';
+    this.color = this.type === 'shield' ? '#0ff' : this.type === 'triple' ? '#f0f' : '#ff0';
     this.ttl = 10;
     this.dead = false;
     this.rot = 0;
@@ -431,6 +443,18 @@ class PowerUp {
       ctx.arc(0, 0, 11, 0, Math.PI * 2);
       ctx.moveTo(0, 11);
       ctx.arc(0, 0, 7, Math.PI / 2, -Math.PI / 2, true);
+      ctx.stroke();
+    } else if (this.type === 'triple') {
+      ctx.beginPath();
+      ctx.moveTo(0, -10);
+      ctx.lineTo(-8, -6);
+      ctx.lineTo(-8, 6);
+      ctx.lineTo(0, 10);
+      ctx.lineTo(8, 6);
+      ctx.lineTo(8, -6);
+      ctx.closePath();
+      ctx.moveTo(0, -10);
+      ctx.lineTo(0, 10);
       ctx.stroke();
     } else {
       ctx.beginPath();
@@ -612,6 +636,8 @@ function update(dt) {
       if (p.type === 'shield') {
         ship.shield = ship.shieldMax;
         ship.shieldTimer = 10;
+      } else if (p.type === 'triple') {
+        ship.tripleShotTimer = 5;
       } else {
         ship.boostTimer = 5;
       }
@@ -696,6 +722,12 @@ function drawHUD() {
     ctx.textAlign = 'right';
     ctx.fillStyle = '#0ff';
     ctx.fillText(`ESCUDO: ${'█'.repeat(ship.shield)}${'░'.repeat(ship.shieldMax - ship.shield)}`, W - 14, 72);
+  }
+
+  if (ship.isTripleShot) {
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#0ff';
+    ctx.fillText(`TRIPLE SHOT: ${ship.tripleShotTimer.toFixed(1)}s`, W - 14, 68);
   }
 }
 
