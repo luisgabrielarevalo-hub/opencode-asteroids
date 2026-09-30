@@ -118,6 +118,92 @@ class Asteroid {
   }
 }
 
+// ── Asteroide especial rápido ("cometa") ──────────────────────────────────────
+// Pequeño, muy rápido, entra por un borde aleatorio en línea recta y
+// desaparece al salir de pantalla o al expirar su TTL. Al destruirlo
+// da más puntos y se divide en 2 asteroides pequeños normales.
+const FAST_RADIUS    = 14;
+const FAST_POINTS    = 150;
+const FAST_SPEED_MIN = 240;
+const FAST_SPEED_MAX = 300;
+const FAST_TTL       = 12;   // segundos máximos en pantalla
+const FAST_MIN_DELAY = 8;    // respawn aleatorio entre 8 y 15 s
+const FAST_MAX_DELAY = 15;
+const FAST_COLOR     = '#ffb02e';
+const FAST_MARGIN    = 60;   // margen fuera de pantalla para eliminarlo
+
+class FastAsteroid {
+  constructor(x, y, vx, vy) {
+    this.x = x;
+    this.y = y;
+    this.vx = vx;
+    this.vy = vy;
+    this.radius = FAST_RADIUS;
+    this.size = 1; // para reutilizar POINTS/split equivalentes si hiciera falta
+    this.ttl = FAST_TTL;
+    this.dead = false;
+    this.rotSpeed = rand(-2.5, 2.5);
+    this.rot = rand(0, Math.PI * 2);
+
+    // Polígono irregular pequeño
+    const n = randInt(8, 11);
+    this.verts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const r = this.radius * rand(0.6, 1.0);
+      this.verts.push([Math.cos(a) * r, Math.sin(a) * r]);
+    }
+  }
+
+  update(dt) {
+    // Recto, sin wrap: cruza y se va
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.rot += this.rotSpeed * dt;
+    this.ttl -= dt;
+    if (this.ttl <= 0) this.dead = true;
+    if (
+      this.x < -FAST_MARGIN || this.x > W + FAST_MARGIN ||
+      this.y < -FAST_MARGIN || this.y > H + FAST_MARGIN
+    ) this.dead = true;
+  }
+
+  split() {
+    return [
+      new Asteroid(this.x, this.y, 1),
+      new Asteroid(this.x, this.y, 1),
+    ];
+  }
+
+  draw() {
+    // Estela en dirección opuesta al movimiento
+    const speed = Math.hypot(this.vx, this.vy) || 1;
+    const nx = this.vx / speed;
+    const ny = this.vy / speed;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 176, 46, 0.55)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(this.x - nx * this.radius * 3.2, this.y - ny * this.radius * 3.2);
+    ctx.lineTo(this.x - nx * this.radius * 0.8, this.y - ny * this.radius * 0.8);
+    ctx.stroke();
+    // Parpadeo cuando está por expirar
+    if (this.ttl < 2 && Math.floor(this.ttl * 6) % 2 === 0) ctx.globalAlpha = 0.35;
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+    ctx.strokeStyle = FAST_COLOR;
+    ctx.lineWidth   = 1.8;
+    ctx.lineJoin    = 'round';
+    ctx.beginPath();
+    ctx.moveTo(this.verts[0][0], this.verts[0][1]);
+    for (let i = 1; i < this.verts.length; i++)
+      ctx.lineTo(this.verts[i][0], this.verts[i][1]);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 // ── Ship ──────────────────────────────────────────────────────────────────────
 class Ship {
   constructor() { this.reset(); }
@@ -291,10 +377,11 @@ class PowerUp {
 }
 
 // ── Estado del juego ──────────────────────────────────────────────────────────
-let ship, bullets, asteroids, particles, powerups;
+let ship, bullets, asteroids, particles, powerups, fastAsteroids;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
+let fastTimer;  // cuenta atrás para el asteroide especial
 
 function spawnAsteroids(count) {
   const SAFE_DIST = 130;
@@ -308,16 +395,35 @@ function spawnAsteroids(count) {
   }
 }
 
+function resetFastTimer() {
+  fastTimer = rand(FAST_MIN_DELAY, FAST_MAX_DELAY);
+}
+
+function spawnFastAsteroid() {
+  // Punto aleatorio en un borde y rumbo recto hacia el lado opuesto
+  const edge = randInt(0, 3);
+  let x, y, baseAngle;
+  if (edge === 0)      { x = rand(0, W); y = -20; baseAngle = Math.PI / 2; }
+  else if (edge === 1) { x = W + 20; y = rand(0, H); baseAngle = Math.PI; }
+  else if (edge === 2) { x = rand(0, W); y = H + 20; baseAngle = -Math.PI / 2; }
+  else                 { x = -20; y = rand(0, H); baseAngle = 0; }
+  const angle = baseAngle + rand(-0.5, 0.5);
+  const speed = rand(FAST_SPEED_MIN, FAST_SPEED_MAX);
+  fastAsteroids.push(new FastAsteroid(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed));
+}
+
 function initGame() {
   ship          = new Ship();
   bullets   = [];
   asteroids = [];
   particles = [];
   powerups  = [];
+  fastAsteroids = [];
   score  = 0;
   lives  = 3;
   level  = 1;
   state  = 'playing';
+  resetFastTimer();
   spawnAsteroids(4);
 }
 
@@ -326,7 +432,9 @@ function nextLevel() {
   bullets   = [];
   particles = [];
   powerups  = [];
+  fastAsteroids = [];
   ship.reset();
+  resetFastTimer();
   spawnAsteroids(3 + level);
 }
 
@@ -360,6 +468,8 @@ function update(dt) {
     particles.forEach(p => p.update(dt));
     particles = particles.filter(p => !p.dead);
     asteroids.forEach(a => a.update(dt));
+    fastAsteroids.forEach(f => f.update(dt));
+    fastAsteroids = fastAsteroids.filter(f => !f.dead);
     if (deadTimer <= 0) { state = 'playing'; ship.reset(); }
     return;
   }
@@ -369,15 +479,24 @@ function update(dt) {
     bullets.push(...ship.tryShoot());
   }
 
+  // Temporizador del asteroide especial (máx. 1 en pantalla)
+  fastTimer -= dt;
+  if (fastTimer <= 0) {
+    if (!fastAsteroids.some(f => !f.dead)) spawnFastAsteroid();
+    resetFastTimer();
+  }
+
   ship.update(dt);
   bullets.forEach(b => b.update(dt));
   asteroids.forEach(a => a.update(dt));
+  fastAsteroids.forEach(f => f.update(dt));
   particles.forEach(p => p.update(dt));
   powerups.forEach(p => p.update(dt));
 
   bullets   = bullets.filter(b => !b.dead);
   particles = particles.filter(p => !p.dead);
   powerups  = powerups.filter(p => !p.dead);
+  fastAsteroids = fastAsteroids.filter(f => !f.dead);
 
   // Bala vs asteroide
   const newAsteroids = [];
@@ -397,12 +516,35 @@ function update(dt) {
   asteroids = asteroids.filter(a => !a.dead).concat(newAsteroids);
   bullets   = bullets.filter(b => !b.dead);
 
-  // Nave vs asteroide
+  // Bala vs asteroide especial: más puntos y se divide en 2 pequeños
+  for (const b of bullets) {
+    for (const f of fastAsteroids) {
+      if (!f.dead && !b.dead && dist(b, f) < f.radius) {
+        b.dead = true;
+        f.dead = true;
+        score += FAST_POINTS;
+        explode(f.x, f.y, 10);
+        asteroids.push(...f.split());
+      }
+    }
+  }
+  fastAsteroids = fastAsteroids.filter(f => !f.dead);
+  bullets       = bullets.filter(b => !b.dead);
+
+  // Nave vs asteroide (normales + especial)
   if (ship.invincible <= 0) {
     for (const a of asteroids) {
       if (dist(ship, a) < ship.radius + a.radius * 0.82) {
         killShip();
         break;
+      }
+    }
+    if (state === 'playing') {
+      for (const f of fastAsteroids) {
+        if (dist(ship, f) < ship.radius + f.radius * 0.82) {
+          killShip();
+          break;
+        }
       }
     }
   }
@@ -477,6 +619,7 @@ function draw() {
 
   particles.forEach(p => p.draw());
   asteroids.forEach(a => a.draw());
+  fastAsteroids.forEach(f => f.draw());
   powerups.forEach(p => p.draw());
   bullets.forEach(b => b.draw());
   ship.draw();
