@@ -205,8 +205,9 @@ class FastAsteroid {
 }
 
 // ── Skins de nave ───────────────────────────────────────────────────────────────
-// Cada skin define silueta (nariz hacia +X, contenida en ~±20px para no
-// romper colisiones ni la posición de salida de las balas) y colores.
+// Cada skin define silueta (nariz hacia +X, contenida en ~±20px a escala 1) y
+// colores, más `scale` (tamaño/colisión/salida de bala) y `scoreMultiplier`
+// (puntos). La Titán usa `scale: 2` y `scoreMultiplier: 2`.
 // Añadir una skin nueva es solo agregar un objeto a SHIP_SKINS.
 function drawClassicShip() {
   ctx.beginPath();
@@ -258,10 +259,20 @@ function drawTankerShip() {
   ctx.stroke();
 }
 
+// Titán: misma silueta que la clásica, dibujada al doble de tamaño
+// vía `scale: 2` (ver SHIP_SKINS). No duplicar coordenadas aquí.
+function drawTitanShip() {
+  drawClassicShip();
+}
+
+const SHIP_BASE_RADIUS = 12;
+const SHIP_BASE_NOSE   = 21; // distancia de salida de la bala desde el centro
+
 const SHIP_SKINS = [
-  { id: 'classic',     name: 'CLASICA',     color: '#fff', flame: 'rgba(255, 130, 0, 0.85)',  draw: drawClassicShip },
-  { id: 'interceptor', name: 'INTERCEPTOR', color: '#0ff', flame: 'rgba(0, 200, 255, 0.9)',   draw: drawInterceptorShip },
-  { id: 'tanker',      name: 'TANQUE',      color: '#7dff6a', flame: 'rgba(255, 220, 60, 0.9)', draw: drawTankerShip },
+  { id: 'classic',     name: 'CLASICA',     color: '#fff', flame: 'rgba(255, 130, 0, 0.85)',  draw: drawClassicShip,     scale: 1, scoreMultiplier: 1 },
+  { id: 'interceptor', name: 'INTERCEPTOR', color: '#0ff', flame: 'rgba(0, 200, 255, 0.9)',   draw: drawInterceptorShip, scale: 1, scoreMultiplier: 1 },
+  { id: 'tanker',      name: 'TANQUE',      color: '#7dff6a', flame: 'rgba(255, 220, 60, 0.9)', draw: drawTankerShip,      scale: 1, scoreMultiplier: 1 },
+  { id: 'titan',       name: 'TITAN',       color: '#ff9d00', flame: 'rgba(255, 60, 60, 0.9)', draw: drawTitanShip,       scale: 2, scoreMultiplier: 2 },
 ];
 
 const SKIN_STORAGE_KEY = 'asteroids_skin';
@@ -280,7 +291,27 @@ function saveSkin() {
 
 function cycleSkin() {
   currentSkin = (currentSkin + 1) % SHIP_SKINS.length;
+  // Sincronizar el radio de colisión de inmediato (sin esperar al próximo update)
+  if (typeof ship !== 'undefined' && ship) {
+    ship.radius = SHIP_BASE_RADIUS * getShipScale();
+  }
   saveSkin();
+}
+
+function getActiveSkin() {
+  return SHIP_SKINS[currentSkin] || SHIP_SKINS[0];
+}
+
+function getShipScale() {
+  return getActiveSkin().scale || 1;
+}
+
+function getScoreMultiplier() {
+  return getActiveSkin().scoreMultiplier || 1;
+}
+
+function addScore(base) {
+  score += base * getScoreMultiplier();
 }
 
 // ── Ship ──────────────────────────────────────────────────────────────────────
@@ -293,7 +324,7 @@ class Ship {
     this.angle  = -Math.PI / 2;
     this.vx     = 0;
     this.vy     = 0;
-    this.radius = 12;
+    this.radius = SHIP_BASE_RADIUS * getShipScale();
     this.thrusting     = false;
     this.invincible    = 3;
     this.shootCooldown = 0;
@@ -317,6 +348,8 @@ class Ship {
 
   update(dt) {
     if (this.dead) return;
+    // El radio sigue a la skin activa (Titán = 2x) aunque se cambie en mitad de la partida
+    this.radius = SHIP_BASE_RADIUS * getShipScale();
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.speedBoost    > 0) this.speedBoost    -= dt;
@@ -345,7 +378,7 @@ class Ship {
   tryShoot() {
     if (this.shootCooldown > 0 || this.dead) return [];
     this.shootCooldown = 0.2;
-    const NOSE = 21;
+    const NOSE = SHIP_BASE_NOSE * getShipScale();
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
     if (this.tripleShot <= 0) return [new Bullet(ox, oy, this.angle)];
@@ -378,9 +411,11 @@ class Ship {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    const skin = SHIP_SKINS[currentSkin];
+    const skin = getActiveSkin();
+    const scale = skin.scale || 1;
+    ctx.scale(scale, scale);
     ctx.strokeStyle = skin.color;
-    ctx.lineWidth   = 1.5;
+    ctx.lineWidth   = 1.5 / scale;
     ctx.lineJoin    = 'round';
 
     // Silueta según la skin activa
@@ -644,7 +679,7 @@ function update(dt) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += POINTS[a.size];
+        addScore(POINTS[a.size]);
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
         if (a.size > 1) {
@@ -668,7 +703,7 @@ function update(dt) {
       if (!f.dead && !b.dead && dist(b, f) < f.radius) {
         b.dead = true;
         f.dead = true;
-        score += FAST_POINTS;
+        addScore(FAST_POINTS);
         explode(f.x, f.y, 10);
         asteroids.push(...f.split());
       }
@@ -687,7 +722,7 @@ function update(dt) {
       if (!a.dead && dist(ship, a) < ship.radius + a.radius * 0.82) {
         if (shielded) {
           a.dead = true;
-          score += POINTS[a.size];
+          addScore(POINTS[a.size]);
           explode(a.x, a.y, a.size * 5);
           shieldHits.push(...a.split());
           if (a.size > 1) {
@@ -711,7 +746,7 @@ function update(dt) {
         if (!f.dead && dist(ship, f) < ship.radius + f.radius * 0.82) {
           if (shielded) {
             f.dead = true;
-            score += FAST_POINTS;
+            addScore(FAST_POINTS);
             explode(f.x, f.y, 10);
             asteroids.push(...f.split());
           } else {
@@ -793,10 +828,12 @@ function drawHUD() {
     ctx.fillText(`ESCUDO  ${Math.max(0, ship.shield).toFixed(1)}s`, 14, hudY);
   }
 
-  // Skin activa (S para cambiar)
+  // Skin activa (S para cambiar). La Titán otorga doble de puntos.
+  const skin = getActiveSkin();
+  const mult = getScoreMultiplier();
   ctx.textAlign = 'right';
-  ctx.fillStyle = SHIP_SKINS[currentSkin].color;
-  ctx.fillText(`NAVE: ${SHIP_SKINS[currentSkin].name}  [S]`, W - 14, H - 14);
+  ctx.fillStyle = skin.color;
+  ctx.fillText(`NAVE: ${skin.name}${mult > 1 ? ' x2 PTS' : ''}  [S]`, W - 14, H - 14);
 }
 
 function drawOverlay(title, sub) {
