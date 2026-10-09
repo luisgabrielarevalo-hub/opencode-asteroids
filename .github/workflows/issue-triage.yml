@@ -1,0 +1,145 @@
+name: issue-triage
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Triage issue (labels + formato + contexto)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const MARKER = '<!-- triaged-by: issue-triage -->';
+            const issue = context.payload.issue;
+            if (!issue) {
+              core.info('Sin issue en el payload, nada que hacer.');
+              return;
+            }
+
+            const originalBody = issue.body ?? '';
+            if (originalBody.includes(MARKER)) {
+              core.info(`Issue #${issue.number} ya triageado, salto.`);
+              return;
+            }
+
+            const title = issue.title ?? '';
+            const text = `${title}\n${originalBody}`.toLowerCase();
+
+            const LABEL_DEFS = {
+              'bug':           { color: 'd73a4a', description: 'Algo no funciona' },
+              'enhancement':   { color: 'a2eeef', description: 'Nueva funcionalidad propuesta' },
+              'improvement':   { color: 'cfd3d7', description: 'Mejora o refactor' },
+              'documentation': { color: '0075ca', description: 'Docs / README' },
+              'question':      { color: 'd876e3', description: 'Pregunta o duda' },
+              'area:game':     { color: 'fbca04', description: 'Lógica del juego (game.js / canvas)' },
+              'triage':        { color: 'ededed', description: 'Pendiente de revisión' },
+            };
+
+            const RULES = [
+              { label: 'bug',           re: /bug|error|fallo|falla|no funciona|crash|roto|no dispara|no colisiona|se rompe/ },
+              { label: 'enhancement',   re: /feature|nueva|funcionalidad|propongo|propuesta|sugier|sugerencia|añadir|agregar/ },
+              { label: 'improvement',   re: /mejora|refactor|limpieza|optimiz|rendimiento/ },
+              { label: 'documentation', re: /doc\b|readme|documenta/ },
+              { label: 'question',      re: /pregunta|duda|c[oó]mo|question|help|ayuda/ },
+              { label: 'area:game',     re: /nave|skin|titan|cometa|power-?up|asteroide|canvas|colisi|game\.js|disparo|nivel|vidas/ },
+            ];
+
+            const matched = [...new Set(
+              RULES.filter(r => r.re.test(text)).map(r => r.label)
+            )];
+            const labels = matched.length > 0 ? matched : ['triage'];
+            core.info(`Labels calculados para #${issue.number}: ${labels.join(', ')}`);
+
+            // 1. Crear labels que falten (addLabels falla si no existen)
+            const { data: existing } = await github.rest.issues.listLabelsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const existingNames = new Set(existing.map(l => l.name));
+            for (const name of labels) {
+              if (!existingNames.has(name)) {
+                const def = LABEL_DEFS[name];
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                  color: def.color,
+                  description: def.description,
+                });
+                core.info(`Label creado: ${name}`);
+              }
+            }
+
+            // 2. Asignar labels
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              labels,
+            });
+
+            // 3. Archivos probablemente relevantes
+            const hints = [];
+            if (/nave|skin|titan|disparo/.test(text)) hints.push('`game.js` → clase `Ship` / `cycleSkin()` / spawn de balas (`NOSE=21`)');
+            if (/cometa|fugaz|fast/.test(text)) hints.push('`game.js` → clase `FastAsteroid` (spawn 8–15s, `FAST_MARGIN=60`, `FAST_TTL=12`)');
+            if (/power-?up|escudo|triple|velocidad/.test(text)) hints.push('`game.js` → clase `PowerUp` (kinds `speed|triple|shield`, TTL 8s)');
+            if (/asteroide|colisi|nivel|fragment/.test(text)) hints.push('`game.js` → clase `Asteroid` (`RADII/SPEEDS/POINTS`, split 2× `size-1`, colisión ×0.82)');
+            if (/canvas|render|dibuj|pantalla|800x600/.test(text)) hints.push('`index.html` (canvas 800x600 `id="canvas"`) + `draw()`/`loop()` en `game.js`');
+            if (hints.length === 0) hints.push('`game.js` (revisar `update`/`draw`/`loop`) e `index.html`');
+
+            const resumen = labels.includes('bug') ? 'Reporte de bug'
+              : labels.includes('enhancement') ? 'Solicitud de funcionalidad'
+              : labels.includes('question') ? 'Pregunta'
+              : labels.includes('improvement') ? 'Propuesta de mejora'
+              : labels.includes('documentation') ? 'Tema de documentación'
+              : 'Pendiente de clasificar';
+
+            const quoted = (originalBody.trim() === '')
+              ? '> _Sin descripción._'
+              : originalBody.split('\n').map(l => (l.trim() === '' ? '>' : `> ${l}`)).join('\n');
+
+            const fecha = new Date().toISOString().slice(0, 10);
+            const sha = context.sha.slice(0, 7);
+
+            const newBody = `${MARKER}
+            ## Resumen
+            ${resumen}.
+
+            ## Reporte original (verbatim, por @${issue.user.login})
+            ${quoted}
+
+            ## Contexto del repo (para /oc y revisores)
+            - \`index.html\` carga \`game.js\` con \`<script>\` plano, canvas 800x600 \`id="canvas"\`.
+            - \`game.js\` (~840 líneas, \`'use strict'\`): clases \`Ship\`, \`Bullet\`, \`Asteroid\`, \`FastAsteroid\`, \`PowerUp\`, \`Particle\`; estados \`playing|dead|gameover\`.
+            - Sin dependencias, bundler ni tests. Controles: \`←/→\` rotar, \`↑\` thrust, \`Space\` disparar, \`S\` skin. Colisión con factor \`0.82\`, \`dt\` clamp \`0.05\`.
+            - Archivos probablemente relevantes:
+            ${hints.map(h => `  - ${h}`).join('\n')}
+
+            ---
+            <sub>Triageado el ${fecha} · autor @${issue.user.login} · \`main@${sha}\` · título original: "${title.replace(/"/g, "'")}"</sub>
+            `.replace(/^            /gm, '');
+
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: newBody,
+            });
+
+            // 4. Comentario separado de confirmación
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: `Gracias por el reporte, @${issue.user.login}. Lo etiqueté como \`${labels.join('`, `')}\` y formateé el cuerpo.\n\nPara trabajarlo con opencode comenta \`/oc <instrucción>\`.`,
+            });
+
+            core.info(`Issue #${issue.number} triageado correctamente.`);
